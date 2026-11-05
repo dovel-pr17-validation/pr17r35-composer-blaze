@@ -1,0 +1,71 @@
+name: Benchmark On Demand
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  benchmark:
+    if: >
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/benchmark ')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Parse and validate benchmark name
+        id: input
+        env:
+          COMMENT: ${{ github.event.comment.body }}
+        run: |
+          BENCHMARK=$(echo "$COMMENT" | awk '{print $2}')
+          VALID="attributes aware class compilation default forwarding forwarding-merge merge named-slots no-attributes slot"
+          if ! echo "$VALID" | grep -qw "$BENCHMARK"; then
+            echo "::error::Unknown benchmark '$BENCHMARK'. Valid options: $VALID"
+            exit 1
+          fi
+          echo "benchmark=$BENCHMARK" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout base branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+          extensions: mbstring, dom, curl, json, libxml, xml, xmlwriter, simplexml, tokenizer
+          ini-values: opcache.enable=1, opcache.enable_cli=1, opcache.file_update_protection=0, opcache.jit=disable
+
+      - name: Install base dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Generate baseline snapshot
+        run: vendor/bin/testbench benchmark ${{ steps.input.outputs.benchmark }} --ci --iterations=5000 --rounds=10 --attempts=10 --snapshot
+
+      - name: Save baseline snapshot
+        run: cp benchmark-snapshot.json ${{ runner.temp }}/benchmark-snapshot.json
+
+      - name: Checkout PR
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+
+      - name: Install PR dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Restore baseline snapshot
+        run: cp ${{ runner.temp }}/benchmark-snapshot.json benchmark-snapshot.json
+
+      - name: Run benchmark
+        run: |
+          echo "${{ github.event.issue.number }}" > benchmark-result.md
+          vendor/bin/testbench benchmark ${{ steps.input.outputs.benchmark }} --ci --iterations=5000 --rounds=10 --attempts=10 >> benchmark-result.md
+
+      - name: Upload benchmark result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: benchmark-result
+          path: benchmark-result.md

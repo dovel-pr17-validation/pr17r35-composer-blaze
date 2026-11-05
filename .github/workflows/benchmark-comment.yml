@@ -1,0 +1,49 @@
+name: Benchmark Comment
+
+on:
+  workflow_run:
+    workflows: [CI, Benchmark On Demand]
+    types: [completed]
+
+jobs:
+  comment:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event != 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+
+    steps:
+      - name: Download benchmark result
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: benchmark-result
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        run: |
+          echo "number=$(sed -n '1p' benchmark-result.md)" >> "$GITHUB_OUTPUT"
+          echo "heading=$(sed -n '2p' benchmark-result.md)" >> "$GITHUB_OUTPUT"
+          tail -n +2 benchmark-result.md > benchmark-comment.md
+          echo "" >> benchmark-comment.md
+          echo "<sub>To run a specific benchmark, comment <code>/benchmark &lt;name&gt;</code><br><code>attributes</code>, <code>aware</code>, <code>class</code>, <code>default</code>, <code>forwarding</code>, <code>forwarding-merge</code>, <code>merge</code>, <code>named-slots</code>, <code>no-attributes</code>, <code>slot</code>, <code>compilation</code></sub>" >> benchmark-comment.md
+
+      - name: Find existing comment
+        uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e # v3.1.0
+        id: find
+        with:
+          issue-number: ${{ steps.meta.outputs.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '${{ steps.meta.outputs.heading }}'
+
+      - name: Post or update comment
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        with:
+          issue-number: ${{ steps.meta.outputs.number }}
+          comment-id: ${{ steps.find.outputs.comment-id }}
+          edit-mode: replace
+          body-path: benchmark-comment.md

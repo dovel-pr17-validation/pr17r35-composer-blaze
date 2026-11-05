@@ -1,0 +1,10 @@
+laravel: '@testbench'
+
+providers:
+  - App\Providers\WorkbenchServiceProvider
+
+workbench:
+  install: true
+  discovers:
+    commands: true
+    views: true
